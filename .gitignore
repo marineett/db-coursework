@@ -8,3 +8,5 @@ backend/bin/
 coverage.out
 web/frontend/node_modules/
 web/**/node_modules/
+web/backend/*.tar.gz
+web/console/server
