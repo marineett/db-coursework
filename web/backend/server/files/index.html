@@ -1,0 +1,638 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API Docs</title>
+    <link rel="stylesheet" href="/api/v2/static/swagger-ui/swagger-ui.css" />
+    <style>
+      body { margin: 0; }
+      #swagger-ui { height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/api/v2/static/swagger-ui/swagger-ui-bundle.js"></script>
+    <script>
+      window.addEventListener('load', () => {
+        console.log('Swagger UI загружается...');
+        
+        // Загружаем спецификацию явно через fetch для лучшего контроля
+        fetch('/api/v2/openapi.json')
+          .then(response => {
+            console.log('Fetch response status:', response.status, 'content-type:', response.headers.get('content-type'));
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(spec => {
+            console.log('Спецификация загружена успешно, ключи:', Object.keys(spec));
+            console.log('openapi версия:', spec.openapi);
+            console.log('info:', spec.info);
+            
+            window.ui = SwaggerUIBundle({
+              spec: spec,
+              dom_id: '#swagger-ui',
+              deepLinking: true,
+              presets: [SwaggerUIBundle.presets.apis],
+              layout: 'BaseLayout',
+              validatorUrl: null,
+              onComplete: function() {
+                console.log('Swagger UI загружен успешно');
+                // Исправляем отображение "Undocumented Error" для успешных ответов
+                fixUndocumentedErrors();
+                // Наблюдаем за изменениями в DOM для исправления новых ответов
+                const observer = new MutationObserver(() => {
+                  fixUndocumentedErrors();
+                });
+                observer.observe(document.getElementById('swagger-ui'), {
+                  childList: true,
+                  subtree: true
+                });
+              },
+              onFailure: function(data) {
+                console.error('ОШИБКА загрузки Swagger UI:', data);
+                console.error('Детали ошибки:', JSON.stringify(data, null, 2));
+              },
+              responseInterceptor: (response) => {
+                const contentType = response.headers.get('content-type') || '';
+                const url = response.url || '';
+                const status = response.status;
+                
+                // Логируем все ответы для отладки
+                console.log('Response interceptor:', {
+                  url: url,
+                  status: status,
+                  contentType: contentType,
+                  headers: Object.fromEntries(response.headers.entries())
+                });
+                
+                // Исправляем проблему с "Undocumented Error" для успешных ответов
+                // Swagger UI может неправильно интерпретировать ответы, если Content-Type не точно совпадает
+                if (status >= 200 && status < 300) {
+                  // Для JSON ответов убеждаемся, что Content-Type правильный
+                  if (contentType.includes('application/json') || contentType.includes('text/json')) {
+                    // Клонируем response и исправляем заголовки
+                    const clonedResponse = response.clone();
+                    const modifiedHeaders = new Headers(response.headers);
+                    
+                    // Убеждаемся, что Content-Type точно application/json
+                    if (!contentType.includes('application/json')) {
+                      modifiedHeaders.set('Content-Type', 'application/json; charset=utf-8');
+                    }
+                    
+                    // Создаем новый response с исправленными заголовками
+                    const modifiedResponse = new Response(clonedResponse.body, {
+                      status: status,
+                      statusText: response.statusText,
+                      headers: modifiedHeaders
+                    });
+                    
+                    // Исправляем отображение после небольшой задержки
+                    setTimeout(() => {
+                      if (typeof fixUndocumentedErrors === 'function') {
+                        fixUndocumentedErrors();
+                      }
+                    }, 100);
+                    
+                    return modifiedResponse;
+                  }
+                  
+                  // Для других типов контента также исправляем отображение
+                  setTimeout(() => {
+                    if (typeof fixUndocumentedErrors === 'function') {
+                      fixUndocumentedErrors();
+                    }
+                  }, 100);
+                  
+                  return response;
+                }
+                
+                // Если это запрос к openapi, проверяем ответ
+                if (url.includes('openapi')) {
+                  console.log('Обнаружен запрос к openapi, проверяем ответ...');
+                  const clonedResponse = response.clone();
+                  clonedResponse.text().then(text => {
+                    console.log('Содержимое openapi (первые 500 символов):', text.substring(0, 500));
+                    console.log('Длина ответа:', text.length);
+                    console.log('Начинается с:', text.substring(0, 50));
+                    // Проверяем, это JSON или YAML
+                    const isJson = text.trim().startsWith('{') || text.trim().startsWith('[');
+                    console.log('Это JSON?', isJson);
+                    if (!isJson) {
+                      console.warn('ВНИМАНИЕ: Ответ не JSON, возможно проблема с конвертацией!');
+                    } else {
+                      // Пробуем распарсить JSON для проверки валидности
+                      try {
+                        const parsed = JSON.parse(text);
+                        console.log('JSON валидный! Ключи верхнего уровня:', Object.keys(parsed));
+                      } catch (e) {
+                        console.error('ОШИБКА: JSON невалидный!', e);
+                      }
+                    }
+                  }).catch(err => {
+                    console.error('Ошибка при чтении ответа:', err);
+                  });
+                  
+                  // Важно: возвращаем оригинальный response, не клонированный
+                  return response;
+                }
+                // Возвращаем response для всех остальных запросов
+                if (contentType.includes('text/html') || url.includes('documentation')) {
+                  console.log('Обнаружен HTML ответ или запрос к documentation, запускаю обработку...');
+                  // Сохраняем оригинальный clone для дальнейшего использования
+                  const clonedResponse = response.clone();
+                  // Даем Swagger UI обработать ответ, но затем модифицируем отображение
+                  // Увеличиваем задержку, чтобы Swagger UI успел отрисовать ответ
+                  setTimeout(() => {
+                    console.log('Запускаю replaceHtmlWithIframe после задержки (1 сек)');
+                    replaceHtmlWithIframe();
+                  }, 1000);
+                  setTimeout(() => {
+                    console.log('Запускаю replaceHtmlWithIframe после задержки (3 сек)');
+                    replaceHtmlWithIframe();
+                  }, 3000);
+                  setTimeout(() => {
+                    console.log('Запускаю replaceHtmlWithIframe после задержки (5 сек)');
+                    replaceHtmlWithIframe();
+                  }, 5000);
+                  return response;
+                }
+                return response;
+              }
+            });
+          })
+          .catch(error => {
+            console.error('ОШИБКА при загрузке спецификации:', error);
+            // Fallback: пробуем загрузить через url
+            console.log('Пробуем загрузить через url как fallback...');
+            window.ui = SwaggerUIBundle({
+              url: '/api/v2/openapi.json',
+              dom_id: '#swagger-ui',
+              deepLinking: true,
+              presets: [SwaggerUIBundle.presets.apis],
+              layout: 'BaseLayout',
+              validatorUrl: null,
+              onFailure: function(data) {
+                console.error('ОШИБКА загрузки через url:', data);
+              }
+            });
+          });
+        
+        // Функция для замены HTML-текста на iframe
+        function replaceHtmlWithIframe() {
+          console.log('replaceHtmlWithIframe вызвана');
+          
+          // Расширенные селекторы для поиска блоков ответов в Swagger UI
+          // Swagger UI использует разные классы в зависимости от версии
+          const responseBlocks = document.querySelectorAll(
+            '#swagger-ui .response, ' +
+            '#swagger-ui .response-body, ' +
+            '#swagger-ui [class*="response"], ' +
+            '#swagger-ui .responses-wrapper, ' +
+            '#swagger-ui .response-col_status, ' +
+            '#swagger-ui .response-col_description, ' +
+            '#swagger-ui .opblock-body, ' +
+            '#swagger-ui .opblock-section, ' +
+            '#swagger-ui .opblock-section-body, ' +
+            '#swagger-ui .highlight-code, ' +
+            '#swagger-ui .microlight, ' +
+            '#swagger-ui .response-content-type, ' +
+            '#swagger-ui .response-col_links, ' +
+            '#swagger-ui .model-box, ' +
+            '#swagger-ui .model-container, ' +
+            '#swagger-ui [class*="opblock"], ' +
+            '#swagger-ui [class*="response"]'
+          );
+          console.log('Найдено блоков ответов (расширенный поиск):', responseBlocks.length);
+          
+          // Если не нашли через селекторы, ищем все pre элементы в swagger-ui
+          if (responseBlocks.length === 0) {
+            console.log('Блоки ответов не найдены через селекторы, ищем все pre элементы в swagger-ui');
+            const allPreInSwagger = document.querySelectorAll('#swagger-ui pre');
+            console.log('Найдено pre элементов в swagger-ui:', allPreInSwagger.length);
+            
+              // Обрабатываем все pre элементы, которые могут содержать HTML
+              allPreInSwagger.forEach((pre, index) => {
+                const text = (pre.textContent || '').trim();
+                console.log(`Pre элемент ${index}: длина=${text.length}, первые 500 символов:`, text.substring(0, 500));
+                
+                // Более гибкая проверка на HTML - проверяем разные варианты
+                const startsWithHtml = text.startsWith('<!DOCTYPE html>') || 
+                                       text.startsWith('<!doctype html>') ||
+                                       text.startsWith('<!DOCTYPE HTML>') ||
+                                       text.startsWith('<html') ||
+                                       text.startsWith('<HTML');
+                
+                const hasHtmlStructure = text.includes('<head>') || 
+                                         text.includes('<HEAD>') ||
+                                         text.includes('<body>') ||
+                                         text.includes('<BODY>') ||
+                                         text.includes('<!DOCTYPE') ||
+                                         text.includes('<!doctype');
+                
+                // Для documentation ответов делаем более мягкую проверку
+                // Проверяем, находится ли pre внутри блока ответа
+                const isInResponseBlock = pre.closest('.response') || 
+                                         pre.closest('.response-body') ||
+                                         pre.closest('[class*="response"]') ||
+                                         pre.closest('.opblock-body') ||
+                                         pre.closest('.opblock-section');
+                
+                const isDocumentationResponse = isInResponseBlock && 
+                                                (text.includes('<!DOCTYPE') || 
+                                                 text.includes('<!doctype') ||
+                                                 text.includes('<html') ||
+                                                 text.includes('<HTML') ||
+                                                 text.includes('<head>') ||
+                                                 text.includes('<body>'));
+                
+                const isHtml = (startsWithHtml && 
+                               text.length > 100 && 
+                               hasHtmlStructure) || isDocumentationResponse;
+                
+                console.log(`Pre элемент ${index}: startsWithHtml=${startsWithHtml}, hasHtmlStructure=${hasHtmlStructure}, length=${text.length}, isDocumentationResponse=${isDocumentationResponse}, isHtml=${isHtml}`);
+              
+              if (isHtml) {
+                console.log(`Найден HTML в pre элементе ${index}`);
+                // Проверяем, не обработан ли уже
+                if (pre.dataset.htmlProcessed === 'true' || pre.closest('.html-preview-container')) {
+                  return;
+                }
+                
+                pre.dataset.htmlProcessed = 'true';
+                
+                // Создаем Blob и iframe (код такой же, как ниже)
+                const blob = new Blob([text], { type: 'text/html; charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                
+                const wrapper = document.createElement('div');
+                wrapper.className = 'html-preview-container';
+                wrapper.style.marginTop = '10px';
+                
+                const toggleBtn = document.createElement('button');
+                toggleBtn.textContent = 'Показать исходный код';
+                toggleBtn.style.cssText = 'margin-bottom: 10px; padding: 8px 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px; font-size: 14px;';
+                toggleBtn.onmouseover = () => toggleBtn.style.background = '#45a049';
+                toggleBtn.onmouseout = () => toggleBtn.style.background = '#4CAF50';
+                
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.className = 'html-preview-iframe';
+                iframe.style.cssText = 'width: 100%; height: 800px; border: 1px solid #ddd; border-radius: 4px; background: white;';
+                
+                let showIframe = true;
+                toggleBtn.onclick = () => {
+                  if (showIframe) {
+                    iframe.style.display = 'none';
+                    pre.style.display = 'block';
+                    toggleBtn.textContent = 'Показать HTML';
+                    toggleBtn.style.background = '#2196F3';
+                  } else {
+                    iframe.style.display = 'block';
+                    pre.style.display = 'none';
+                    toggleBtn.textContent = 'Показать исходный код';
+                    toggleBtn.style.background = '#4CAF50';
+                  }
+                  showIframe = !showIframe;
+                };
+                
+                pre.style.display = 'none';
+                wrapper.appendChild(toggleBtn);
+                wrapper.appendChild(iframe);
+                
+                if (pre.nextSibling) {
+                  pre.parentNode.insertBefore(wrapper, pre.nextSibling);
+                } else {
+                  pre.parentNode.appendChild(wrapper);
+                }
+                
+                console.log('Iframe создан для pre элемента', index);
+              }
+            });
+            
+            // Выходим, так как обработали все pre элементы
+            return;
+          }
+          
+          responseBlocks.forEach((block, blockIndex) => {
+            console.log(`Обрабатываем блок ответа ${blockIndex}:`, block);
+            // Ищем pre элементы внутри блоков ответов
+            const preElements = block.querySelectorAll('pre, code');
+            console.log(`В блоке ${blockIndex} найдено pre/code элементов:`, preElements.length);
+            
+            preElements.forEach((pre, preIndex) => {
+              console.log(`Проверяем элемент ${blockIndex}-${preIndex}:`, pre);
+              const text = (pre.textContent || '').trim();
+              console.log(`Элемент ${blockIndex}-${preIndex}: длина=${text.length}, первые 200 символов:`, text.substring(0, 200));
+              
+              // Проверяем на HTML (более строгая проверка)
+              const startsWithHtml = text.startsWith('<!DOCTYPE html>') || 
+                                     text.startsWith('<!doctype html>') ||
+                                     text.startsWith('<!DOCTYPE HTML>') ||
+                                     text.startsWith('<html') ||
+                                     text.startsWith('<HTML');
+              
+              const hasHtmlStructure = text.includes('<head>') || 
+                                       text.includes('<HEAD>') ||
+                                       text.includes('<body>') ||
+                                       text.includes('<BODY>') ||
+                                       text.includes('<!DOCTYPE') ||
+                                       text.includes('<!doctype');
+              
+              // Для documentation ответов делаем более мягкую проверку
+              const isInResponseBlock = block.closest('.response') || 
+                                       block.closest('.response-body') ||
+                                       block.closest('[class*="response"]') ||
+                                       block.closest('.opblock-body') ||
+                                       block.closest('.opblock-section');
+              
+              const isDocumentationResponse = isInResponseBlock && 
+                                              (text.includes('<!DOCTYPE') || 
+                                               text.includes('<!doctype') ||
+                                               text.includes('<html') ||
+                                               text.includes('<HTML') ||
+                                               text.includes('<head>') ||
+                                               text.includes('<body>'));
+              
+              const isHtml = (startsWithHtml && 
+                             text.length > 500 && 
+                             hasHtmlStructure) || isDocumentationResponse;
+              
+              console.log(`Элемент ${blockIndex}-${preIndex}: isHtml=${isHtml}, startsWithHtml=${startsWithHtml}, hasHtmlStructure=${hasHtmlStructure}, length=${text.length}, isDocumentationResponse=${isDocumentationResponse}`);
+              
+              if (isHtml) {
+                // Проверяем, не обработан ли уже этот элемент
+                if (pre.dataset.htmlProcessed === 'true' || pre.closest('.html-preview-container')) {
+                  return;
+                }
+                
+                console.log('Найден HTML контент в блоке ответа, создаю iframe...', pre);
+                pre.dataset.htmlProcessed = 'true';
+                
+                // Создаем Blob из HTML
+                const blob = new Blob([text], { type: 'text/html; charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                
+                // Создаем обертку для iframe
+                const wrapper = document.createElement('div');
+                wrapper.className = 'html-preview-container';
+                wrapper.style.marginTop = '10px';
+                
+                // Кнопка переключения
+                const toggleBtn = document.createElement('button');
+                toggleBtn.textContent = 'Показать исходный код';
+                toggleBtn.style.cssText = 'margin-bottom: 10px; padding: 8px 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px; font-size: 14px;';
+                toggleBtn.onmouseover = () => toggleBtn.style.background = '#45a049';
+                toggleBtn.onmouseout = () => toggleBtn.style.background = '#4CAF50';
+                
+                // Создаем iframe
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.className = 'html-preview-iframe';
+                iframe.style.cssText = 'width: 100%; height: 800px; border: 1px solid #ddd; border-radius: 4px; background: white;';
+                
+                let showIframe = true;
+                toggleBtn.onclick = () => {
+                  if (showIframe) {
+                    iframe.style.display = 'none';
+                    pre.style.display = 'block';
+                    toggleBtn.textContent = 'Показать HTML';
+                    toggleBtn.style.background = '#2196F3';
+                  } else {
+                    iframe.style.display = 'block';
+                    pre.style.display = 'none';
+                    toggleBtn.textContent = 'Показать исходный код';
+                    toggleBtn.style.background = '#4CAF50';
+                  }
+                  showIframe = !showIframe;
+                };
+                
+                // Скрываем исходный элемент и добавляем наш контейнер
+                pre.style.display = 'none';
+                wrapper.appendChild(toggleBtn);
+                wrapper.appendChild(iframe);
+                
+                // Вставляем после pre элемента
+                if (pre.nextSibling) {
+                  pre.parentNode.insertBefore(wrapper, pre.nextSibling);
+                } else {
+                  pre.parentNode.appendChild(wrapper);
+                }
+                
+                console.log('Iframe создан и вставлен для HTML ответа');
+              }
+            });
+          });
+        }
+        
+        // Используем MutationObserver для отслеживания изменений DOM
+        const observer = new MutationObserver((mutations) => {
+          let shouldCheck = false;
+          mutations.forEach(mutation => {
+            if (mutation.addedNodes.length > 0) {
+              shouldCheck = true;
+            }
+          });
+          if (shouldCheck) {
+            console.log('MutationObserver: обнаружены изменения DOM, вызываем replaceHtmlWithIframe');
+            setTimeout(replaceHtmlWithIframe, 100);
+          }
+        });
+        
+        // Наблюдаем за изменениями в swagger-ui
+        const swaggerContainer = document.getElementById('swagger-ui');
+        if (swaggerContainer) {
+          console.log('MutationObserver: начинаем наблюдение за swagger-ui контейнером');
+          observer.observe(swaggerContainer, {
+            childList: true,
+            subtree: true
+          });
+        } else {
+          console.error('ERROR: swagger-ui контейнер не найден!');
+        }
+        
+        // Также проверяем периодически (увеличиваем частоту для надежности)
+        console.log('Запускаем периодическую проверку каждые 2 секунды');
+        setInterval(() => {
+          replaceHtmlWithIframe();
+        }, 2000);
+        
+        // Вызываем сразу после загрузки
+        console.log('Вызываем replaceHtmlWithIframe сразу после загрузки');
+        setTimeout(replaceHtmlWithIframe, 1000);
+        
+        // Проверяем при клике на Execute
+        document.addEventListener('click', (e) => {
+          if (e.target && (e.target.textContent === 'Execute' || e.target.classList.contains('execute') || e.target.textContent === 'Try it out')) {
+            console.log('Обнаружен клик на Execute/Try it out, запускаю обработку...');
+            setTimeout(() => {
+              console.log('Вызываю replaceHtmlWithIframe после клика (1.5 сек)');
+              replaceHtmlWithIframe();
+              addOpenInNewTabButton();
+            }, 1500);
+            setTimeout(() => {
+              console.log('Вызываю replaceHtmlWithIframe после клика (3 сек)');
+              replaceHtmlWithIframe();
+              addOpenInNewTabButton();
+            }, 3000);
+            setTimeout(() => {
+              console.log('Вызываю replaceHtmlWithIframe после клика (5 сек)');
+              replaceHtmlWithIframe();
+              addOpenInNewTabButton();
+            }, 5000);
+          }
+        }, true);
+        
+        // Функция для исправления "Undocumented Error" для успешных ответов
+        function fixUndocumentedErrors() {
+          // Ищем все элементы с текстом "Undocumented Error" или "Undocumented"
+          const allElements = document.querySelectorAll('#swagger-ui *');
+          allElements.forEach(element => {
+            const text = element.textContent || '';
+            const innerHTML = element.innerHTML || '';
+            
+            // Ищем паттерн "Undocumented Error: <status>" или "Undocumented Error: <text>"
+            const match = text.match(/Undocumented\s+Error:\s*(\w+)/i);
+            if (match) {
+              const statusText = match[1];
+              // Пытаемся определить статус код из текста
+              let statusCode = null;
+              if (statusText === 'Created' || statusText === '201') {
+                statusCode = 201;
+              } else if (statusText === 'OK' || statusText === '200') {
+                statusCode = 200;
+              } else if (!isNaN(parseInt(statusText))) {
+                statusCode = parseInt(statusText);
+              }
+              
+              // Если это успешный статус код (2xx), исправляем отображение
+              if (statusCode && statusCode >= 200 && statusCode < 300) {
+                console.log('Исправляю Undocumented Error для статуса', statusCode);
+                const statusText = getStatusText(statusCode);
+                
+                // Заменяем текст
+                if (element.textContent) {
+                  element.textContent = element.textContent.replace(
+                    /Undocumented\s+Error:\s*\w+/i,
+                    `${statusCode} ${statusText}`
+                  );
+                }
+                if (element.innerHTML) {
+                  element.innerHTML = element.innerHTML.replace(
+                    /Undocumented\s+Error:\s*\w+/gi,
+                    `${statusCode} ${statusText}`
+                  );
+                }
+                
+                // Убираем классы ошибок и добавляем классы успеха
+                element.classList.remove('error', 'response-undocumented', 'undocumented');
+                element.classList.add('response-success', 'success');
+                
+                // Ищем родительские элементы и исправляем их тоже
+                let parent = element.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                  if (parent.classList) {
+                    parent.classList.remove('error', 'response-undocumented', 'undocumented');
+                    if (parent.textContent && parent.textContent.includes('Undocumented')) {
+                      parent.textContent = parent.textContent.replace(
+                        /Undocumented\s+Error:\s*\w+/gi,
+                        `${statusCode} ${statusText}`
+                      );
+                    }
+                  }
+                  parent = parent.parentElement;
+                }
+              }
+            }
+          });
+          
+          // Также исправляем элементы с классом "response-undocumented" или содержащие "undocumented"
+          const undocumentedElements = document.querySelectorAll(
+            '#swagger-ui .response-undocumented, ' +
+            '#swagger-ui [class*="undocumented"], ' +
+            '#swagger-ui .response-col_status, ' +
+            '#swagger-ui .response-col_description'
+          );
+          undocumentedElements.forEach(element => {
+            const text = element.textContent || '';
+            if (text.includes('Undocumented')) {
+              // Ищем статус код в тексте или соседних элементах
+              const statusMatch = text.match(/(\d{3})/);
+              if (statusMatch) {
+                const statusCode = parseInt(statusMatch[1]);
+                if (statusCode >= 200 && statusCode < 300) {
+                  const statusText = getStatusText(statusCode);
+                  element.classList.remove('response-undocumented', 'error', 'undocumented');
+                  element.classList.add('response-success', 'success');
+                  element.textContent = text.replace(/Undocumented\s+Error:\s*\w+/gi, `${statusCode} ${statusText}`);
+                }
+              }
+            }
+          });
+        }
+        
+        function getStatusText(code) {
+          const statusTexts = {
+            200: 'OK',
+            201: 'Created',
+            202: 'Accepted',
+            204: 'No Content',
+            206: 'Partial Content'
+          };
+          return statusTexts[code] || 'Success';
+        }
+        
+        // Функция для добавления кнопки "Открыть в новой вкладке"
+        function addOpenInNewTabButton() {
+          // Ищем все блоки ответов
+          const responseSections = document.querySelectorAll('#swagger-ui .response, #swagger-ui .response-body, #swagger-ui [class*="response"]');
+          responseSections.forEach(section => {
+            const pre = section.querySelector('pre');
+            if (pre) {
+              const text = (pre.textContent || '').trim();
+              if ((text.startsWith('<!DOCTYPE html>') || text.startsWith('<html')) && text.length > 100) {
+                // Проверяем, есть ли уже кнопка
+                if (section.querySelector('.open-html-tab-btn') || section.previousElementSibling?.classList.contains('open-html-tab-btn')) {
+                  return;
+                }
+                
+                // Создаем кнопку
+                const btn = document.createElement('button');
+                btn.className = 'open-html-tab-btn';
+                btn.textContent = '📄 Открыть HTML в новой вкладке';
+                btn.style.cssText = 'margin: 10px 0; padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold; display: block;';
+                btn.onmouseover = () => btn.style.background = '#0056b3';
+                btn.onmouseout = () => btn.style.background = '#007bff';
+                
+                btn.onclick = () => {
+                  const blob = new Blob([text], { type: 'text/html; charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  window.open(url, '_blank');
+                };
+                
+                // Вставляем кнопку перед секцией ответа
+                if (section.parentNode) {
+                  section.parentNode.insertBefore(btn, section);
+                } else {
+                  section.insertBefore(btn, section.firstChild);
+                }
+              }
+            }
+          });
+        }
+        
+        // Периодически добавляем кнопки и исправляем ошибки
+        setInterval(() => {
+          addOpenInNewTabButton();
+          if (typeof fixUndocumentedErrors === 'function') {
+            fixUndocumentedErrors();
+          }
+        }, 1500);
+      }); // Закрывает window.addEventListener('load', () => { ... })
+    </script>
+  </body>
+  </html>
+
+

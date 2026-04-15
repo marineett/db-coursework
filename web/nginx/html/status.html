@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Статус сервера</title>
+  <link rel="stylesheet" href="/status.css">
+  <script defer src="/status.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="header">
+      <h1>Статус Nginx</h1>
+      <p class="subtitle">Информация в реальном времени — обновляется автоматически</p>
+    </header>
+
+    <section class="cards">
+      <article class="card">
+        <h2>Активные соединения</h2>
+        <div id="active" class="big">—</div>
+      </article>
+
+      <article class="card">
+        <h2>Принято / Обработано / Запросов</h2>
+        <div class="three">
+          <div><span id="accepted">—</span><small>accepted</small></div>
+          <div><span id="handled">—</span><small>handled</small></div>
+          <div><span id="requests">—</span><small>requests</small></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h2>Reading / Writing / Waiting</h2>
+        <div class="three">
+          <div><span id="reading">—</span><small>reading</small></div>
+          <div><span id="writing">—</span><small>writing</small></div>
+          <div><span id="waiting">—</span><small>waiting</small></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="graph-card card">
+      <h2>График запросов (последние 60 точек)</h2>
+      <canvas id="requestsChart" width="760" height="160"></canvas>
+    </section>
+
+    <footer class="footer">Обновляется каждые 2 секунды. Источник: <code>/status/raw</code></footer>
+  </main>
+</body>
+</html>

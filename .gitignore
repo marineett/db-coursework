@@ -6,3 +6,5 @@ logs/
 .env.*
 backend/bin/
 coverage.out
+web/frontend/node_modules/
+web/**/node_modules/
