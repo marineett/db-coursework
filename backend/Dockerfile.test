@@ -1,0 +1,8 @@
+# Используйте подходящий базовый образ, например, для Go:
+FROM golang:1.23-alpine
+
+
+COPY . /app
+WORKDIR /app
+
+CMD ["go", "test", "-covermode=atomic", "./data_base/...", "-v"] 
